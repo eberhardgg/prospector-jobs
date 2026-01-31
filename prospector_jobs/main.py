@@ -66,7 +66,13 @@ async def run() -> list[JobPosting]:
 
     # Notify via Slack
     if config.has_slack:
-        sent = await notify_slack(unique, config.slack_webhook_url, config.min_score)
+        sent = await notify_slack(
+            unique,
+            webhook_url=config.slack_webhook_url,
+            bot_token=config.slack_bot_token,
+            channel_id=config.slack_channel_id,
+            min_score=config.min_score,
+        )
         logger.info("Sent %d Slack notifications", sent)
 
     # Store results
