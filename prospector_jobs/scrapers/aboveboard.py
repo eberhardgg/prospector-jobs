@@ -1,4 +1,9 @@
-"""AboveBoard executive job board scraper."""
+"""AboveBoard executive job board scraper.
+
+Note: AboveBoard has migrated to TruePlatform (trueplatform.com).
+The site is JS-rendered and requires Playwright for scraping.
+This scraper will attempt plain HTTP but may return 0 results.
+"""
 
 from __future__ import annotations
 
@@ -12,29 +17,34 @@ from .base import BaseScraper
 
 logger = logging.getLogger(__name__)
 
-SEARCH_URL = "https://www.aboveboard.com/jobs"
-SEARCH_PARAMS = {
-    "q": "chief product officer",
-    "function": "product",
-}
+SEARCH_URL = "https://trueplatform.com/search/"
 
 
 class AboveboardScraper(BaseScraper):
-    """Scrape AboveBoard for executive product roles."""
+    """Scrape AboveBoard/TruePlatform for executive product roles."""
 
     name = "aboveboard"
 
     async def scrape(self) -> list[JobPosting]:
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
-                resp = await self._get(client, SEARCH_URL, params=SEARCH_PARAMS)
+                resp = await self._get(client, SEARCH_URL)
                 return self._parse_results(resp.text)
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code in (403, 404):
+                    logger.debug(
+                        "[aboveboard] Site requires JS rendering — "
+                        "enable Playwright for this scraper"
+                    )
+                else:
+                    logger.error("[aboveboard] Search failed: %s", e)
+                return []
             except httpx.HTTPError as e:
                 logger.error("[aboveboard] Search failed: %s", e)
                 return []
 
     def _parse_results(self, html: str) -> list[JobPosting]:
-        """Parse AboveBoard job listing page."""
+        """Parse AboveBoard/TruePlatform job listing page."""
         soup = BeautifulSoup(html, "html.parser")
         postings: list[JobPosting] = []
 
@@ -53,7 +63,7 @@ class AboveboardScraper(BaseScraper):
                 if isinstance(raw_href, str):
                     href = raw_href
                     if href.startswith("/"):
-                        href = f"https://www.aboveboard.com{href}"
+                        href = f"https://trueplatform.com{href}"
 
             postings.append(
                 JobPosting(

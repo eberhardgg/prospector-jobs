@@ -1,4 +1,9 @@
-"""Indeed job board scraper."""
+"""Indeed job board scraper.
+
+Note: Indeed aggressively blocks non-browser requests (403).
+This scraper requires SerpAPI or Playwright to work reliably.
+Without those, it will log a warning and return empty results.
+"""
 
 from __future__ import annotations
 
@@ -44,6 +49,12 @@ class IndeedScraper(BaseScraper):
         try:
             resp = await self._get(client, url)
             return self._parse_results(resp.text)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 403:
+                logger.debug("[indeed] Blocked (403) — Indeed requires browser/SerpAPI")
+            else:
+                logger.error("[indeed] Search failed for '%s': %s", term, e)
+            return []
         except httpx.HTTPError as e:
             logger.error("[indeed] Search failed for '%s': %s", term, e)
             return []
@@ -53,7 +64,6 @@ class IndeedScraper(BaseScraper):
         soup = BeautifulSoup(html, "html.parser")
         postings: list[JobPosting] = []
 
-        # Indeed uses various card structures
         for card in soup.select("div.job_seen_beacon, div.jobsearch-ResultsList > div"):
             title_el = card.select_one("h2.jobTitle a, a.jcs-JobTitle")
             company_el = card.select_one("span[data-testid='company-name'], span.companyName")
