@@ -72,6 +72,7 @@ async def run() -> list[JobPosting]:
             bot_token=config.slack_bot_token,
             channel_id=config.slack_channel_id,
             min_score=config.min_score,
+            total_scanned=len(all_postings),
         )
         logger.info("Sent %d Slack notifications", sent)
 

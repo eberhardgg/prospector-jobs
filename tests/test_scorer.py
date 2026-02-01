@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 from prospector_jobs.models import JobPosting
 from prospector_jobs.scorer import (
-    score_description,
+    score_company,
     score_freshness,
     score_posting,
     score_remote,
@@ -16,25 +16,25 @@ from prospector_jobs.scorer import (
 
 class TestScoreTitle:
     def test_cpo_gets_max(self):
-        assert score_title("Chief Product Officer") == 40
+        assert score_title("Chief Product Officer") == 50
 
     def test_cpto_gets_max(self):
-        assert score_title("CPTO") == 40
+        assert score_title("CPTO") == 50
 
     def test_vp_product(self):
-        assert score_title("VP of Product") == 30
+        assert score_title("VP of Product") == 25
 
     def test_vice_president_product(self):
-        assert score_title("Vice President of Product") == 30
+        assert score_title("Vice President of Product") == 25
 
     def test_head_of_product(self):
-        assert score_title("Head of Product") == 28
+        assert score_title("Head of Product") == 22
 
     def test_svp_product(self):
-        assert score_title("SVP of Product") == 32
+        assert score_title("SVP of Product") == 28
 
     def test_director_product(self):
-        assert score_title("Director of Product") == 15
+        assert score_title("Director of Product") == 8
 
     def test_product_manager_gets_zero(self):
         assert score_title("Product Manager") == 0
@@ -43,47 +43,53 @@ class TestScoreTitle:
         assert score_title("Senior Software Engineer") == 0
 
     def test_case_insensitive(self):
-        assert score_title("chief product officer") == 40
-        assert score_title("CHIEF PRODUCT OFFICER") == 40
+        assert score_title("chief product officer") == 50
+        assert score_title("CHIEF PRODUCT OFFICER") == 50
 
 
-class TestScoreDescription:
-    def test_startup_signals(self):
-        desc = "Join our Series B startup as we build the product team from scratch."
-        score = score_description(desc)
+class TestScoreCompany:
+    def test_fortune_500_penalized(self):
+        score = score_company("JPMorganChase", "VP Product", "")
+        assert score == -30
+
+    def test_recruiter_penalized(self):
+        score = score_company("Lensa", "VP Product", "")
+        assert score == -20
+
+    def test_staffing_firm_penalized(self):
+        score = score_company("The Brydon Group", "CPO", "")
+        assert score == -20
+
+    def test_startup_boosted(self):
+        score = score_company("Acme Corp", "CPO", "Series B startup building SaaS platform")
         assert score > 0
 
-    def test_fractional_boost(self):
-        desc = "Looking for a fractional product leader."
-        score = score_description(desc)
-        assert score >= 10
+    def test_unknown_company_neutral(self):
+        score = score_company("RandomCo", "CPO", "")
+        assert score == 0
 
-    def test_interim_boost(self):
-        desc = "Interim Chief Product Officer needed for 6-month engagement."
-        score = score_description(desc)
-        assert score >= 8
+    def test_fractional_big_boost(self):
+        score = score_company("Acme", "CPO", "Looking for a fractional CPO")
+        assert score >= 15
 
-    def test_no_signals(self):
-        desc = "We are a Fortune 500 company looking for a product manager."
-        assert score_description(desc) == 0
+    def test_first_hire_big_boost(self):
+        score = score_company("Acme", "CPO", "This is our first product hire")
+        assert score >= 15
 
-    def test_multiple_signals_cap_at_30(self):
-        desc = (
-            "Fractional interim part-time contract role at early-stage Series A "
-            "startup. Building the product team as first product hire."
-        )
-        assert score_description(desc) <= 30
+    def test_vc_backed(self):
+        score = score_company("Acme", "CPO", "Join our venture-backed startup")
+        assert score > 0
 
 
 class TestScoreRemote:
     def test_remote(self):
-        assert score_remote("Remote position") == 5
+        assert score_remote("Remote position") == 8
 
     def test_hybrid(self):
-        assert score_remote("Hybrid - NYC") == 2
+        assert score_remote("Hybrid - NYC") == 3
 
     def test_distributed(self):
-        assert score_remote("Distributed team") == 3
+        assert score_remote("Distributed team") == 5
 
     def test_no_remote(self):
         assert score_remote("On-site in San Francisco") == 0
@@ -96,15 +102,15 @@ class TestScoreRemote:
 class TestScoreFreshness:
     def test_today(self):
         now = datetime.now(UTC)
-        assert score_freshness(now) == 10
+        assert score_freshness(now) == 15
 
     def test_three_days(self):
         date = datetime.now(UTC) - timedelta(days=2)
-        assert score_freshness(date) == 8
+        assert score_freshness(date) == 12
 
     def test_one_week(self):
         date = datetime.now(UTC) - timedelta(days=5)
-        assert score_freshness(date) == 6
+        assert score_freshness(date) == 8
 
     def test_two_weeks(self):
         date = datetime.now(UTC) - timedelta(days=10)
@@ -119,30 +125,62 @@ class TestScoreFreshness:
         assert score_freshness(date) == 0
 
     def test_no_date(self):
-        assert score_freshness(None) == 3
+        assert score_freshness(None) == 5
 
     def test_naive_datetime(self):
         """Naive datetimes should still work (treated as UTC)."""
         date = datetime.now(UTC).replace(tzinfo=None)
         score = score_freshness(date)
-        assert score == 10
+        assert score == 15
 
 
 class TestScorePosting:
-    def test_cpo_remote_fresh(self, sample_cpo_posting):
+    def test_cpo_startup_fresh(self, sample_cpo_posting):
+        """CPO at a startup should score high."""
         score = score_posting(sample_cpo_posting)
-        # CPO title (40) + startup/series B signals + remote (5) + fresh (10) + base (10)
-        assert score >= 65
+        # CPO (40) + startup signals (series B, first CPO, build org) + remote (8) + fresh (15) + base (10)
+        assert score >= 70
 
-    def test_vp_product(self, sample_vp_posting):
+    def test_vp_product_growth(self, sample_vp_posting):
+        """VP Product at growth-stage should be decent."""
         score = score_posting(sample_vp_posting)
-        # VP title (30) + growth-stage signal + fresh (10) + base (10)
-        assert score >= 50
+        assert score >= 40
 
     def test_director_scores_lower(self, sample_director_posting):
+        """Director should score well below CPO."""
         score = score_posting(sample_director_posting)
-        # Director (15) + base (10) + freshness
-        assert score < 50
+        assert score < 40
+
+    def test_fortune_500_crushed(self):
+        """JPMorgan VP Product should be near zero."""
+        posting = JobPosting(
+            title="Vice President, Product Management",
+            company="JPMorganChase",
+            url="https://linkedin.com/jobs/999",
+            source="linkedin",
+            posted_date=datetime.now(UTC),
+            location="New York, NY",
+        )
+        score = score_posting(posting)
+        assert score <= 25
+
+    def test_recruiter_posting_penalized(self):
+        """Lensa aggregator posting should score low."""
+        posting = JobPosting(
+            title="VP, Product Management",
+            company="Lensa",
+            url="https://linkedin.com/jobs/888",
+            source="linkedin",
+            posted_date=datetime.now(UTC),
+        )
+        score = score_posting(posting)
+        assert score <= 30
+
+    def test_cpo_beats_vp(self, sample_cpo_posting, sample_vp_posting):
+        """CPO title should always outscore VP."""
+        cpo_score = score_posting(sample_cpo_posting)
+        vp_score = score_posting(sample_vp_posting)
+        assert cpo_score > vp_score
 
     def test_score_capped_at_100(self):
         """Even with all signals, score shouldn't exceed 100."""
@@ -155,8 +193,21 @@ class TestScorePosting:
             location="Remote - Work from anywhere",
             description=(
                 "Fractional interim part-time contract at early-stage Series A startup. "
-                "First product hire, building the product team. Distributed remote."
+                "First product hire, building the product team. Distributed remote. "
+                "VC-backed SaaS B2B fintech company."
             ),
         )
         score = score_posting(posting)
         assert score <= 100
+
+    def test_score_never_negative(self):
+        """Even worst case, score should be 0 not negative."""
+        posting = JobPosting(
+            title="Director of Product",
+            company="JPMorganChase",
+            url="https://test.com",
+            source="linkedin",
+            posted_date=datetime.now(UTC) - timedelta(days=60),
+        )
+        score = score_posting(posting)
+        assert score >= 0

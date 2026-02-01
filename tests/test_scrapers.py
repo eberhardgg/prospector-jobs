@@ -12,34 +12,57 @@ from prospector_jobs.scrapers.linkedin import LinkedInScraper
 from prospector_jobs.scrapers.wellfound import WellfoundScraper
 
 
-class TestLinkedInScraper:
-    def test_parse_google_results(self, google_search_html):
-        scraper = LinkedInScraper(delay=0)
-        results = scraper._parse_google_results(google_search_html)
-        assert len(results) == 2  # 3rd result is not LinkedIn
+LINKEDIN_SEARCH_HTML = """
+<html><body>
+<div class="base-card">
+    <h3 class="base-search-card__title">Chief Product Officer</h3>
+    <h4 class="base-search-card__subtitle"><a>Acme Corp</a></h4>
+    <span class="job-search-card__location">Remote</span>
+    <a class="base-card__full-link" href="https://www.linkedin.com/jobs/view/cpo-at-acme-123">View</a>
+    <time datetime="2026-01-30">1 day ago</time>
+</div>
+<div class="base-card">
+    <h3 class="base-search-card__title">VP of Product</h3>
+    <h4 class="base-search-card__subtitle"><a>TechStart Inc</a></h4>
+    <span class="job-search-card__location">San Francisco, CA</span>
+    <a class="base-card__full-link" href="https://www.linkedin.com/jobs/view/vp-product-techstart-456">View</a>
+    <time datetime="2026-01-28">3 days ago</time>
+</div>
+</body></html>
+"""
 
+
+class TestLinkedInScraper:
+    def test_parse_results(self):
+        scraper = LinkedInScraper(delay=0)
+        results = scraper._parse_results(LINKEDIN_SEARCH_HTML)
+        assert len(results) == 2
+
+        assert results[0].title == "Chief Product Officer"
+        assert results[0].company == "Acme Corp"
         assert results[0].source == "linkedin"
-        assert "Acme" in results[0].company or "acme" in results[0].title.lower()
         assert "linkedin.com" in results[0].url
+        assert results[0].posted_date is not None
+
+        assert results[1].title == "VP of Product"
+        assert results[1].company == "TechStart Inc"
 
     def test_extract_company(self):
-        scraper = LinkedInScraper(delay=0)
-        assert scraper._extract_company("CPO at Acme Corp - LinkedIn") == "Acme Corp"
-        assert scraper._extract_company("VP Product at TechStart - LinkedIn") == "TechStart"
+        assert LinkedInScraper._extract_company("CPO at Acme Corp - LinkedIn") == "Acme Corp"
+        assert LinkedInScraper._extract_company("VP Product at TechStart - LinkedIn") == "TechStart"
 
     def test_clean_title(self):
-        scraper = LinkedInScraper(delay=0)
         assert (
-            scraper._clean_title("Chief Product Officer at Acme - LinkedIn")
+            LinkedInScraper._clean_title("Chief Product Officer at Acme - LinkedIn")
             == "Chief Product Officer at Acme"
         )
-        assert scraper._clean_title("VP Product | LinkedIn") == "VP Product"
+        assert LinkedInScraper._clean_title("VP Product | LinkedIn") == "VP Product"
 
     @respx.mock
     @pytest.mark.asyncio
-    async def test_scrape_google(self, google_search_html):
-        respx.get("https://www.google.com/search").mock(
-            return_value=httpx.Response(200, text=google_search_html)
+    async def test_scrape(self):
+        respx.get("https://www.linkedin.com/jobs/search/").mock(
+            return_value=httpx.Response(200, text=LINKEDIN_SEARCH_HTML)
         )
         scraper = LinkedInScraper(delay=0)
         results = await scraper.scrape()
@@ -49,34 +72,8 @@ class TestLinkedInScraper:
 
     @respx.mock
     @pytest.mark.asyncio
-    async def test_scrape_serpapi(self):
-        serpapi_response = {
-            "organic_results": [
-                {
-                    "title": "Chief Product Officer at TestCo - LinkedIn",
-                    "link": "https://www.linkedin.com/jobs/view/123",
-                    "snippet": "Join TestCo as CPO",
-                },
-                {
-                    "title": "Random Page",
-                    "link": "https://example.com/not-linkedin",
-                    "snippet": "Not a job",
-                },
-            ]
-        }
-        respx.get("https://serpapi.com/search.json").mock(
-            return_value=httpx.Response(200, json=serpapi_response)
-        )
-        scraper = LinkedInScraper(serpapi_key="test-key", delay=0)
-        results = await scraper.scrape()
-        # Only LinkedIn jobs should be returned
-        assert len(results) >= 1
-        assert all("linkedin.com" in r.url for r in results)
-
-    @respx.mock
-    @pytest.mark.asyncio
     async def test_handles_http_error(self):
-        respx.get("https://www.google.com/search").mock(
+        respx.get("https://www.linkedin.com/jobs/search/").mock(
             return_value=httpx.Response(429, text="Rate limited")
         )
         scraper = LinkedInScraper(delay=0)
@@ -128,12 +125,11 @@ class TestAboveboardScraper:
         assert results[0].title == "Chief Product Officer"
         assert results[0].company == "Enterprise Inc"
         assert results[0].source == "aboveboard"
-        assert "aboveboard.com" in results[0].url
 
     @respx.mock
     @pytest.mark.asyncio
     async def test_scrape(self, aboveboard_search_html):
-        respx.get("https://www.aboveboard.com/jobs").mock(
+        respx.get("https://trueplatform.com/search/").mock(
             return_value=httpx.Response(200, text=aboveboard_search_html)
         )
         scraper = AboveboardScraper(delay=0)
